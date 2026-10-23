@@ -1,6 +1,7 @@
 import re
-from urllib.parse import urlparse, urljoin, urldefrag
+from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
+from stats import initialize_db, record_page
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -40,11 +41,25 @@ def extract_next_links(url, resp):
 
     # parse the html
     soup = BeautifulSoup(content, "html.parser")
-    links = []
-    seen = set()
 
     # use final response url
     baseURL = resp.raw_response.url or resp.url or url
+
+    # reject pages redirected outside allowed
+    if not is_valid(baseURL):
+        return []
+
+    # extract text for statistics
+    for elem in soup(["script", "style", "noscript"]):
+        elem.decompose()
+
+    text = soup.get_text(separator=" ", strip=True)
+
+    # record stat for the page
+    record_page(baseURL, text)
+
+    links = []
+    seen = set()
 
     # extracting the hyperlinks
     for tag in soup.find_all("a", href=True):
@@ -92,6 +107,11 @@ def is_trap(url):
 
     # avoid very long query strings
     if len(parsed.query) > 300:
+        return True
+
+    # avoid urls with excessive query parameters
+    params = parse_qs(parsed.query)
+    if len(params) > 10:
         return True
 
     return False
