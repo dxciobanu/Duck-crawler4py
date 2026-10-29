@@ -24,6 +24,12 @@ class Worker(Thread):
                 self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
             resp = download(tbd_url, self.config, self.logger)
+            if resp.status is None or resp.status == -1 or 600 <= resp.status <= 606:
+                self.logger.error(
+                    f"Server error {resp.status} for {tbd_url}. "
+                    "Stopping crawler to preserve progress."
+                )
+                break
             self.logger.info(
                 f"Downloaded {tbd_url}, status <{resp.status}>, "
                 f"using cache {self.config.cache_server}.")

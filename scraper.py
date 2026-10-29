@@ -2,6 +2,9 @@ import re
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
 from stats import record_page
+import hashlib
+
+seen_content = set()
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -79,8 +82,22 @@ def extract_next_links(url, resp):
 
     text = soup.get_text(separator=" ", strip=True)
 
-    # record stat for the page
-    record_page(baseURL, text)
+    word_count = len(text.split())
+
+    if word_count >= 30:
+        record_page(baseURL, text)
+
+    # Detect pages containing exactly the same normalized text
+    normalized_text = " ".join(text.lower().split())
+    content_hash = hashlib.sha256(
+        normalized_text.encode("utf-8")
+    ).hexdigest()
+
+    # Avoid repeatedly exploring identical page content
+    if content_hash in seen_content:
+        return []
+
+    seen_content.add(content_hash)
 
     return links
 
@@ -88,6 +105,26 @@ def extract_next_links(url, resp):
 def is_trap(url):
     parsed = urlparse(url)
     path = parsed.path.lower()
+
+    # Avoid repetitive DokuWiki action pages.
+    # Keep ordinary wiki articles, but reject alternate views.
+    hostname = parsed.hostname or ""
+    params = parse_qs(parsed.query, keep_blank_values=True)
+
+    if hostname == "wiki.ics.uci.edu":
+        blocked_actions = {
+            "edit", "revisions", "backlink", "backlinks",
+            "media", "admin", "login", "register",
+            "recent", "index", "export", "profile"
+        }
+
+        if "do" in params:
+            return True
+
+        if any(key in params for key in (
+            "id", "rev", "sectok", "ns", "mediado", "image"
+        )):
+            return True
 
     # avoid excessively long urls
     if len(url) > 2048:
@@ -114,6 +151,28 @@ def is_trap(url):
     if len(params) > 10:
         return True
 
+    #Avoid calendar traps with changing dates
+    calendar_patterns = [
+        "calendar",
+        "datepicker",
+        "eventcalendar"
+    ]
+
+    if any(pattern in path for pattern in calendar_patterns):
+        if parsed.query:
+            return True
+
+    #Avoid URLs containing session identifiers
+    session_params = [
+        "sessionid",
+        "phpsessid",
+        "jsessionid",
+        "sid"
+    ]
+
+    if any(param in params for param in session_params):
+        return True
+    
     return False
 
 def is_valid(url):

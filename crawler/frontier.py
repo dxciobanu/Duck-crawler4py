@@ -6,12 +6,13 @@ from queue import Queue, Empty
 
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
+from collections import deque
 
 class Frontier(object):
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
         self.config = config
-        self.to_be_downloaded = list()
+        self.to_be_downloaded = deque()
         
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
@@ -49,13 +50,22 @@ class Frontier(object):
 
     def get_tbd_url(self):
         try:
-            return self.to_be_downloaded.pop()
+            return self.to_be_downloaded.popleft()
         except IndexError:
             return None
 
     def add_url(self, url):
+        #Normalize the URL before processing it
         url = normalize(url)
+
+        #Reject URLs outside the allowed scope or identified as traps
+        if not is_valid(url):
+            return
+
+        #Generate a unique identifier for the URL
         urlhash = get_urlhash(url)
+
+        #Only add URLs we haven't discovered before
         if urlhash not in self.save:
             self.save[urlhash] = (url, False)
             self.save.sync()
