@@ -3,9 +3,11 @@ from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
 from stats import record_page
 
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
+
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -84,6 +86,7 @@ def extract_next_links(url, resp):
 
     return links
 
+
 # attempt to avoid traps
 def is_trap(url):
     parsed = urlparse(url)
@@ -116,6 +119,7 @@ def is_trap(url):
 
     return False
 
+
 def is_valid(url):
     # Decide whether to crawl this url or not. 
     # If you decide to crawl it, return True; otherwise return False.
@@ -135,8 +139,8 @@ def is_valid(url):
         hostname = parsed.hostname
         if hostname is None:
             return False
-        if not any (hostname == domain or hostname.endswith("." + domain)
-                    for domain in allowed):
+        if not any(hostname == domain or hostname.endswith("." + domain)
+                   for domain in allowed):
             return False
 
         # rejecting non-ASCII urls
