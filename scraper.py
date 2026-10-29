@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
-from stats import initialize_db, record_page
+from stats import record_page
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -27,6 +27,11 @@ def extract_next_links(url, resp):
 
     # retrieve the contents of the webpage and prevent processing large pages (like 10 MB)
     content = resp.raw_response.content
+
+    # ignore empty pages
+    if not content:
+        return []
+
     if len(content) > 10 * 1024 * 1024:
         return []
 
@@ -35,13 +40,6 @@ def extract_next_links(url, resp):
     if content_type and "text/html" not in content_type:
         return []
 
-    # ignore any empty pages
-    if not content:
-        return []
-
-    # parse the html
-    soup = BeautifulSoup(content, "html.parser")
-
     # use final response url
     baseURL = resp.raw_response.url or resp.url or url
 
@@ -49,15 +47,8 @@ def extract_next_links(url, resp):
     if not is_valid(baseURL):
         return []
 
-    # extract text for statistics
-    for elem in soup(["script", "style", "noscript"]):
-        elem.decompose()
-
-    text = soup.get_text(separator=" ", strip=True)
-
-    # record stat for the page
-    record_page(baseURL, text)
-
+    # parse the html
+    soup = BeautifulSoup(content, "html.parser")
     links = []
     seen = set()
 
@@ -81,6 +72,15 @@ def extract_next_links(url, resp):
         if absURL not in seen:
             seen.add(absURL)
             links.append(absURL)
+
+    # extract text for statistics
+    for elem in soup(["script", "style", "noscript"]):
+        elem.decompose()
+
+    text = soup.get_text(separator=" ", strip=True)
+
+    # record stat for the page
+    record_page(baseURL, text)
 
     return links
 
