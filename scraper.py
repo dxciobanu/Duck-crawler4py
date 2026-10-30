@@ -147,9 +147,7 @@ def is_calendar(parsed):
     keys = {key.lower() for key in params}
 
     # common calendar navigation parameters
-    if keys & {
-        "ical", "ical_export", "tribe-bar-date", "tribe_events_cat", "eventdate"
-    }:
+    if keys & {"ical", "ical_export"}:
         return True
 
     calendar_path = re.search(
@@ -170,11 +168,16 @@ def is_calendar(parsed):
     if dated_listing:
         return True
 
-    # format like /calendar?year=2026&month=10
-    if keys & {"date", "day", "week", "month", "year"}:
-        return True
+    # date navigation on calendar/listing endpoints only
+    listing_endpoint = re.search(
+        r"/(?:calendar|calendars|events)"
+        r"(?:/(?:day|week|month|list))?/?$",
+        path
+    )
 
-    return False
+    navigation_keys = {"date", "day", "week", "month", "year", "tribe-bar-date", "eventdate"}
+
+    return bool(listing_endpoint and keys & navigation_keys)
 
 
 # attempt to avoid traps
@@ -258,7 +261,8 @@ def is_valid(url):
             + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
             + r"|epub|dll|cnf|tgz|sha1"
             + r"|thmx|mso|arff|rtf|jar|csv"
-            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
+            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$"
+            + r"|svg|webp|avif|woff2?|ttf|otf|ics|xml|json", parsed.path.lower())
 
     # a little confused here, can i change this? don't want crawler to crash if it
     # encounters an url we want to reject
