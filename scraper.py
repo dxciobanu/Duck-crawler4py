@@ -1,12 +1,23 @@
+import hashlib
 import re
+from collections import Counter
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
 from stats import record_page
 
+# constants
+MAX_PAGE_BYTES = 10 * 1024 * 1024
+MIN_WORDS = 20
+MIN_UNIQUE_WORDS = 8
+MAX_SAME_PAGES = 3
+
+# these are to track the pages processed
+processed_urls = set()
+fingerprints = Counter()
+
 
 def scraper(url, resp):
-    links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link)]
+    return extract_next_links(url, resp)
 
 
 def extract_next_links(url, resp):
@@ -21,76 +32,159 @@ def extract_next_links(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
     # only allow successful responses, status of 200 means it's successful
-    if resp.status != 200:
+    if resp is None or resp.status != 200:
         return []
 
-    if resp.raw_response is None:
+    raw = resp.raw_response
+    if raw is None or not raw.content:
         return []
 
-    # retrieve the contents of the webpage and prevent processing large pages (like 10 MB)
-    content = resp.raw_response.content
-
-    # ignore empty pages
-    if not content:
+    if len(raw.content) > MAX_PAGE_BYTES:
         return []
 
-    if len(content) > 10 * 1024 * 1024:
-        return []
-
-    # check the content type and avoid parsing non-HTML content
-    content_type = resp.raw_response.headers.get("Content-Type", "").lower()
-    if content_type and "text/html" not in content_type:
+    # check the content type and avoid parsing non-HTML and XHTML content
+    content_type = raw.headers.get("Content-Type", "")
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type and media_type not in {
+        "text/html", "application/xhtml+xml"
+    }:
         return []
 
     # use final response url
-    baseURL = resp.raw_response.url or resp.url or url
+    baseURL = raw.url or resp.url or url
+
+    try:
+        baseURL = urldefrag(baseURL)[0]
+    except (TypeError, ValueError):
+        return []
 
     # reject pages redirected outside allowed
     if not is_valid(baseURL):
         return []
 
-    # parse the html
-    soup = BeautifulSoup(content, "html.parser")
-    links = []
-    seen = set()
+    # avoid parsing same defragmented url
+    if baseURL in processed_urls:
+        return []
 
-    # extracting the hyperlinks
+    # parse the html
+    soup = BeautifulSoup(raw.content, "html.parser")
+    link = baseURL
+    base_tag = soup.find("base", href=True)
+
+    if base_tag:
+        try:
+            candidate = urljoin(baseURL, base_tag["href"].strip())
+            if urlparse(candidate).scheme in {"http", "https"}:
+                link = candidate
+        except (TypeError, ValueError):
+            pass
+
+    # remove non=content elements before extracting the page text
+    for element in soup(["script", "style", "noscript", "template"]):
+        element.decompose()
+
+    text = soup.get_text(separator=" ", strip=True)
+    tokens = re.findall(r"[a-zA-Z]+", text.lower())
+
+    # record each url
+    record_page(baseURL, text)
+    processed_urls.add(baseURL)
+
+    # we don't care for empty html or pages without any useful content
+    if not tokens:
+        return []
+
+    counts = Counter(tokens)
+    unique_words = len(counts)
+
+    # now handling low information, the idea is that both little text and little
+    # vocabulary will be rejected
+    low_information = (
+            len(tokens) < MIN_WORDS and unique_words < MIN_UNIQUE_WORDS
+    )
+
+    if low_information:
+        return []
+
+    # ignore whitespace and cases when detecting identical text
+    normalized_text = " ".join(text.casefold().split())
+    fingerprint = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+
+    # expand only the first few pages with identical text
+    fingerprints[fingerprint] += 1
+    if fingerprints[fingerprint] > MAX_SAME_PAGES:
+        return []
+
+    # collect distinct and valid links without their fragments
+    links = []
+    seen_links = set()
+
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
         if not href:
             continue
 
         try:
-            # convert to absolute urls
-            absURL = urljoin(baseURL, href)
-
-            # remove url fragments
-            absURL, fragment = urldefrag(absURL)
-
+            next_url = urldefrag(urljoin(link, href))[0]
         except (TypeError, ValueError):
             continue
 
-        # avoid duplicates
-        if absURL not in seen:
-            seen.add(absURL)
-            links.append(absURL)
+        # skip exact same links, previously processed links, and duplicates
+        if next_url == baseURL or next_url in processed_urls or next_url in seen_links:
+            continue
 
-    # extract text for statistics
-    for elem in soup(["script", "style", "noscript"]):
-        elem.decompose()
-
-    text = soup.get_text(separator=" ", strip=True)
-
-    # record stat for the page
-    record_page(baseURL, text)
+        if is_valid(next_url):
+            seen_links.add(next_url)
+            links.append(next_url)
 
     return links
+
+
+# calendar trap avoiding
+def is_calendar(parsed):
+    path = parsed.path.lower()
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    keys = {key.lower() for key in params}
+
+    # common calendar navigation parameters
+    if keys & {
+        "ical", "ical_export", "tribe-bar-date", "tribe_events_cat", "eventdate"
+    }:
+        return True
+
+    calendar_path = re.search(
+        r"/(?:calendar|calendars|events)(?:/|$)", path
+    )
+
+    if not calendar_path:
+        return False
+
+    # calendar formatting like /events/2026/10 or like /calendar/2026-10-30/
+    dated_listing = re.search(
+        r"/(?:calendar|calendars|events)/"
+        r"(?:day/|week/|month/)?"
+        r"\d{4}(?:[-/]\d{1,2}){1,2}(?:/|$)",
+        path
+    )
+
+    if dated_listing:
+        return True
+
+    # format like /calendar?year=2026&month=10
+    if keys & {"date", "day", "week", "month", "year"}:
+        return True
+
+    return False
 
 
 # attempt to avoid traps
 def is_trap(url):
     parsed = urlparse(url)
     path = parsed.path.lower()
+
+    # check if is calendar
+    if is_calendar(parsed):
+        return True
 
     # avoid excessively long urls
     if len(url) > 2048:
@@ -102,10 +196,15 @@ def is_trap(url):
     if len(segments) > 12:
         return True
 
-    # avoid repeated path segments
-    if len(segments) >= 4:
-        for i in range(len(segments) - 3):
-            if len(set(segments[i:i + 4])) == 1:
+    # avoid repeated path segments like /a/a/a/a/
+    for block_size in range(1, len(segments) // 4 + 1):
+        window_size = block_size * 4
+
+        for start in range(len(segments) - window_size + 1):
+            block = segments[start:start + block_size]
+            window = segments[start:start + window_size]
+
+            if window == block * 4:
                 return True
 
     # avoid very long query strings
@@ -113,8 +212,8 @@ def is_trap(url):
         return True
 
     # avoid urls with excessive query parameters
-    params = parse_qs(parsed.query)
-    if len(params) > 10:
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    if sum(len(values) for values in params.values()) > 10:
         return True
 
     return False

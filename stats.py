@@ -89,7 +89,7 @@ def record_page(url, text):
 def print_report():
     with sqlite3.connect(DB_FILE) as conn:
 
-        # unique pages, not by url, need to fix later
+        # unique pages by url
         total = conn.execute(
             "SELECT COUNT(*) FROM pages"
         ).fetchone()[0]
