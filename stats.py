@@ -2,8 +2,9 @@ import sqlite3
 import re
 from urllib.parse import urlparse, urldefrag
 from collections import Counter
+from pathlib import Path
 
-DB_FILE = "crawler_stats.db"
+DB_FILE = Path(__file__).resolve().with_name("crawler_stats.db")
 
 # list of English stop words
 STOP_WORDS = {
