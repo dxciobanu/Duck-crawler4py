@@ -161,7 +161,7 @@ def is_calendar(parsed):
     dated_listing = re.search(
         r"/(?:calendar|calendars|events)/"
         r"(?:day/|week/|month/)?"
-        r"\d{4}(?:[-/]\d{1,2}){1,2}(?:/|$)",
+        r"\d{4}(?:[-/]\d{1,2}){1,2}/?$",
         path
     )
 
