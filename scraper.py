@@ -312,6 +312,8 @@ def is_valid(url):
 
                 if not query["id"][0]:
                     return False
+
+            return True
     except (TypeError, ValueError) as e:
         print(f"Invalid URL {url!r}: {e}")
         return False
