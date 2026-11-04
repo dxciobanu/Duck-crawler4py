@@ -146,18 +146,29 @@ def is_calendar(parsed):
     params = parse_qs(parsed.query, keep_blank_values=True)
     keys = {key.lower() for key in params}
 
-    # common calendar navigation parameters
-    if keys & {"ical", "ical_export"}:
+    # reject calendar export URLs
+    if keys & {
+        "ical",
+        "ical_export",
+        "outlook-ical",
+    }:
         return True
 
+    # reject timestamp-based timeline navigation
+    if re.search(r"/timeline/?$", path):
+        if keys & {"from", "precision"}:
+            return True
+
+    # check whether URL belongs to a calendar or events section
     calendar_path = re.search(
-        r"/(?:calendar|calendars|events)(?:/|$)", path
+        r"/(?:calendar|calendars|events)(?:/|$)",
+        path
     )
 
     if not calendar_path:
         return False
 
-    # calendar formatting like /events/2026/10 or like /calendar/2026-10-30/
+    # reject dated calendar listings
     dated_listing = re.search(
         r"/(?:calendar|calendars|events)/"
         r"(?:day/|week/|month/)?"
@@ -168,14 +179,34 @@ def is_calendar(parsed):
     if dated_listing:
         return True
 
-    # date navigation on calendar/listing endpoints only
+    # reject nested date navigation
+    nested_calendar = re.search(
+        r"/(?:calendar|calendars|events)/"
+        r"(?:[^/]+/)*"
+        r"(?:day|week|month)/"
+        r"\d{4}(?:[-/]\d{1,2}){1,2}/?$",
+        path
+    )
+
+    if nested_calendar:
+        return True
+
+    # reject date navigation parameters on calendar listings
     listing_endpoint = re.search(
         r"/(?:calendar|calendars|events)"
         r"(?:/(?:day|week|month|list))?/?$",
         path
     )
 
-    navigation_keys = {"date", "day", "week", "month", "year", "tribe-bar-date", "eventdate"}
+    navigation_keys = {
+        "date",
+        "day",
+        "week",
+        "month",
+        "year",
+        "tribe-bar-date",
+        "eventdate",
+    }
 
     return bool(listing_endpoint and keys & navigation_keys)
 
@@ -184,6 +215,10 @@ def is_calendar(parsed):
 def is_trap(url):
     parsed = urlparse(url)
     path = parsed.path.lower()
+
+    # reject raw attachment endpoints
+    if "/raw-attachment/" in path:
+        return True
 
     # check if is calendar
     if is_calendar(parsed):
@@ -279,6 +314,38 @@ def is_trap(url):
         value.lower() in blocked_actions2 for value in params.get("action", [])
     ):
         return True
+
+    # avoid wiki revision history traps
+    wiki_path = (
+            "/wiki/" in path
+            or path.endswith("/wiki")
+            or "/doku.php" in path
+    )
+
+    if wiki_path:
+        # historical page revisions
+        if "version" in params:
+            return True
+
+        # wiki history and comparison actions
+        wiki_actions = {
+            "diff",
+            "history",
+            "revisions",
+        }
+
+        if any(
+                value.lower() in wiki_actions
+                for value in params.get("action", [])
+        ):
+            return True
+
+        # raw text views of wiki pages
+        if any(
+                value.lower() in {"txt", "text", "raw"}
+                for value in params.get("format", [])
+        ):
+            return True
 
     # reject excessive query parameters
     if sum(len(values) for values in params.values()) > 10:
