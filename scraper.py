@@ -214,8 +214,73 @@ def is_trap(url):
     if len(parsed.query) > 300:
         return True
 
-    # avoid urls with excessive query parameters
     params = parse_qs(parsed.query, keep_blank_values=True)
+
+    # for specifically skin=[whatever color]
+    if "skin" in params:
+        return True
+
+    # reject repeated parameters seen
+    repeat_keys = {
+        "tab_files",
+        "tab_details",
+        "mediado",
+        "idx",
+        "lang",
+        "skin",
+        "action",
+        "do",
+        "ns",
+        "image",
+        "rev",
+    }
+
+    if any(
+            len(values) > 1
+            for key, values in params.items()
+            if key.lower() in repeat_keys
+    ):
+        return True
+
+    # reject navigation and interface parameters
+    navigation_keys = {
+        "tab_files",
+        "tab_details",
+        "mediado",
+        "idx",
+    }
+
+    if navigation_keys.intersection(params):
+        return True
+
+    # reject non=content actions
+    blocked_actions = {
+        "media",
+        "edit",
+        "login",
+        "history",
+        "revisions",
+        "index",
+    }
+
+    if any(
+        value.lower() in blocked_actions for value in params.get("do", [])
+    ):
+        return True
+
+    # reject potentially problematic mod actions
+    blocked_actions2 = {
+        "update",
+        "edit",
+        "delete",
+    }
+
+    if any(
+        value.lower() in blocked_actions2 for value in params.get("action", [])
+    ):
+        return True
+
+    # reject excessive query parameters
     if sum(len(values) for values in params.values()) > 10:
         return True
 
@@ -293,10 +358,10 @@ def is_valid(url):
             if title.lower().startswith(("file:", "image:")):
                 return False
 
-        # Filter DokuWiki navigation traps
+        # filter DokuWiki navigation traps
         if parsed.hostname == "wiki.ics.uci.edu":
 
-            # Skip DokuWiki utility endpoints
+            # skip DokuWiki utility endpoints
             if parsed.path.startswith("/lib/exe/"):
                 return False
 
@@ -305,7 +370,7 @@ def is_valid(url):
                 keep_blank_values=True
             )
 
-            # Allow only normal article identifiers
+            # allow only normal article identifiers
             if query:
                 if set(query.keys()) != {"id"}:
                     return False
