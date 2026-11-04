@@ -293,9 +293,25 @@ def is_valid(url):
             if title.lower().startswith(("file:", "image:")):
                 return False
 
-        return True
-    # a little confused here, can i change this? don't want crawler to crash if it
-    # encounters an url we want to reject
+        # Filter DokuWiki navigation traps
+        if parsed.hostname == "wiki.ics.uci.edu":
+
+            # Skip DokuWiki utility endpoints
+            if parsed.path.startswith("/lib/exe/"):
+                return False
+
+            query = parse_qs(
+                parsed.query,
+                keep_blank_values=True
+            )
+
+            # Allow only normal article identifiers
+            if query:
+                if set(query.keys()) != {"id"}:
+                    return False
+
+                if not query["id"][0]:
+                    return False
     except (TypeError, ValueError) as e:
         print(f"Invalid URL {url!r}: {e}")
         return False
