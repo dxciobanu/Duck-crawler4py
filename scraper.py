@@ -208,7 +208,7 @@ def is_calendar(parsed):
         "eventdate",
     }
 
-    return bool(listing_endpoint and keys & navigation_keys)
+    return bool(calendar_path and keys & navigation_keys)
 
 
 # attempt to avoid traps
@@ -253,6 +253,10 @@ def is_trap(url):
 
     # for specifically skin=[whatever color]
     if "skin" in params:
+        return True
+
+    # reject social-sharing URL variants
+    if "share" in params:
         return True
 
     # reject repeated parameters seen
@@ -386,7 +390,28 @@ def is_valid(url):
             return False
 
         path = unquote(parsed.path).lower()
-        blocked_extentions = (
+
+        image_directories = {
+            "pix",
+            "pics",
+            "pic",
+            "photos",
+            "gallery",
+            "galleries"
+        }
+
+        # split URL path into directory
+        segments = [segment for segment in path.split("/") if segment]
+
+        # reject urls inside image gallery directories
+        if any(segment in image_directories for segment in segments):
+            return False
+
+        # reject Eppstein image gallery pages
+        if path.startswith("/~eppstein/pix/sv/"):
+            return False
+
+        blocked_extensions = (
             ".css", ".js", ".bmp", ".gif", ".jpg", ".jpeg",
             ".ico", ".png", ".tif", ".tiff", ".mid", ".mp2",
             ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mpeg",
@@ -401,7 +426,7 @@ def is_valid(url):
             ".svg", ".webp", ".avif", ".woff", ".woff2",
             ".ttf", ".otf", ".ics", ".xml", ".json"
         )
-        if path.endswith(blocked_extentions):
+        if path.endswith(blocked_extensions):
             return False
 
         # reject anything with these in them bc of the wiki images
